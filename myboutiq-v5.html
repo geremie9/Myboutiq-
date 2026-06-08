@@ -966,7 +966,8 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);min-height:100vh;max-w
   </div>
   <button onclick="closePin()" style="background:rgba(255,255,255,.1);border:none;border-radius:10px;padding:10px 24px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif" id="btn-annuler-pin">Annuler</button>
 </div>
-<script>
+
+<script type="module">
 // ════════════════════════════════════════
 // DONNÉES PAYS & DEVISES
 // ════════════════════════════════════════
@@ -1248,22 +1249,66 @@ const T={
 };
 
 // ════════════════════════════════════════
+// FIREBASE CONFIG
+// ════════════════════════════════════════
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAR7ya9VVsyOe1eDFwZv6Yy0GDipyVCWGY",
+  authDomain: "myboutiqkg.firebaseapp.com",
+  projectId: "myboutiqkg",
+  storageBucket: "myboutiqkg.firebasestorage.app",
+  messagingSenderId: "914332350584",
+  appId: "1:914332350584:web:0f7c8ccc98635352a2558d",
+  measurementId: "G-61HRLRG0GQ"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+
+// ════════════════════════════════════════
 // ÉTAT GLOBAL
 // ════════════════════════════════════════
-function loadDB(){
-  const d=localStorage.getItem('myboutiq_v5');
-  if(d)return JSON.parse(d);
-  return null;
-}
-function save(){localStorage.setItem('myboutiq_v5',JSON.stringify(DB));}
+async function loadDB(){
+  // 1. Charger depuis localStorage en premier (rapide, hors ligne)
+  const local=localStorage.getItem('myboutiq_v5');
+  let localData=local?JSON.parse(local):null;
 
-let DB=loadDB();
+  // 2. Essayer de charger depuis Firebase
+  try{
+    const snap=await getDoc(doc(db,'boutiques','main'));
+    if(snap.exists()){
+      const fireData=snap.data().DB;
+      // Firebase est prioritaire si les données existent
+      localStorage.setItem('myboutiq_v5',JSON.stringify(fireData));
+      return fireData;
+    }
+  }catch(e){
+    console.warn('Firebase indisponible, mode hors ligne',e);
+  }
+  return localData;
+}
+
+async function save(){
+  // 1. Toujours sauvegarder en local (instantané)
+  localStorage.setItem('myboutiq_v5',JSON.stringify(DB));
+  // 2. Synchroniser avec Firebase en arrière-plan
+  try{
+    await setDoc(doc(db,'boutiques','main'),{DB,updatedAt:new Date().toISOString()});
+  }catch(e){
+    console.warn('Sync Firebase échouée, données sauvées localement',e);
+    showToast('⚠️ Hors ligne — données sauvées localement');
+  }
+}
+
+let DB=null;
 let lang='fr',pays=null,secteur='boutique',ruptureSel=true;
 let panier={},role='patron',catActive='Tout';
 let totalV=0,totalB=0,nbT=0,totalDep=0;
 let achatType='carton',achatTypeA='carton',pxAU=0,pxAUA=0;
 let artCours=null,artCtx=null,artStkCours=null,varArtCours=null,cliCours=null;
-let selEmoji='📦',selCat='',selDepCat='loyer';
+let selEmoji='📦',selCat='';window._depCat='loyer';
 let pinBuf='',dernierRecu=null,objectif=0;
 let varQtys={};
 let artNegEnCours=null;
@@ -1597,7 +1642,7 @@ function ctxPrixVente(){if(!artCtx)return;artCours=artCtx;ouvrirModifRapide(artC
 function ctxReconfig(){if(!artCtx)return;artCours=artCtx;selArt(artCtx,false);document.getElementById('ov-prix').classList.add('show');}
 function ctxAddVar(){if(!artCtx)return;varArtCours=artCtx;document.getElementById('addvar-tit').textContent=t('varianteTitre')+' — '+artCtx.nom;['var-nom','var-pa','var-pv','var-stk'].forEach(id=>document.getElementById(id).value='');document.getElementById('var-bc').style.display='none';document.getElementById('ov-addvar').classList.add('show');}
 function ctxStock(){if(!artCtx)return;selArtStk(artCtx);document.getElementById('ov-stk').classList.add('show');}
-function ctxSuppr(){if(!artCtx)return;if(confirm((lang==='fr'?'Supprimer ':'Delete ')+'"'+artCtx.nom+'" ?')){DB.articles=DB.articles.filter(a=>a.id!==artCtx.id);save();renderProd(catActive==='Tout'?DB.articles:DB.articles.filter(p=>p.cat===catActive));renderStock(DB.articles);renderAgprix();renderAgstk();showToast('🗑️ '+artCtx.nom);}}
+function ctxSuppr(){if(!artCtx)return;showConfirm(lang==='fr'?'🗑️ Supprimer "'+artCtx.nom+'" ?':'🗑️ Delete "'+artCtx.nom+'"?',lang==='fr'?'Cette action est irréversible.':'This action cannot be undone.',()=>{DB.articles=DB.articles.filter(a=>a.id!==artCtx.id);save();renderProd(catActive==='Tout'?DB.articles:DB.articles.filter(p=>p.cat===catActive));renderStock(DB.articles);renderAgprix();renderAgstk();showToast('🗑️ '+artCtx.nom);});}
 
 // STOCK NÉGATIF
 function ouvrirConfirmNeg(p,v){
@@ -1714,7 +1759,7 @@ function ouvrirPanier(){
   document.getElementById('ov-pan').classList.add('show');
 }
 function chgQ(key,d){panier[key]=(panier[key]||0)+d;if(panier[key]<=0)delete panier[key];updatePUI(parseInt(key.split('-')[0]));document.getElementById('pan-total').textContent=fmt(calcTotal());if(!Object.keys(panier).length)closeSheet('ov-pan');else ouvrirPanier();}
-function viderPanier(){panier={};renderProd(catActive==='Tout'?DB.articles:DB.articles.filter(p=>p.cat===catActive));document.getElementById('fcart').classList.add('hidden');closeSheet('ov-pan');}
+function viderPanier(){showConfirm(lang==='fr'?'🛒 Vider le panier ?':'🛒 Clear cart?',lang==='fr'?'Tous les articles sélectionnés seront retirés.':'All selected items will be removed.',()=>{panier={};renderProd(catActive==='Tout'?DB.articles:DB.articles.filter(p=>p.cat===catActive));document.getElementById('fcart').classList.add('hidden');closeSheet('ov-pan');});}
 function procederPaiement(){
   // Ouvrir calculatrice monnaie
   closeSheet('ov-pan');
@@ -1746,7 +1791,7 @@ function encaisser(){
   });
   totalV+=total;totalB+=ben;nbT++;
   const h=new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-  DB.ventes.push({id:DB.ventes.length+1,total,ben,lignes,heure:h,date:new Date().toLocaleDateString('fr-FR')});
+  DB.ventes.push({id:Date.now(),total,ben,lignes,heure:h,date:new Date().toLocaleDateString('fr-FR')});
   save();
   dernierRecu={boutique:DB.config.nom,lignes,total,heure:h,date:new Date().toLocaleDateString('fr-FR')};
   panier={};closeSheet('ov-calc');document.getElementById('fcart').classList.add('hidden');
@@ -1903,7 +1948,19 @@ function renderClients(){
     <button class="bnxt" style="margin-top:12px" onclick="ouvrirAjoutClient()">➕ ${t('nouveauClient')}</button>`;
 }
 function ouvrirAjoutClient(){const d=new Date();d.setDate(d.getDate()+7);document.getElementById('cli-date').value=d.toISOString().split('T')[0];['cli-nom','cli-tel','cli-cred'].forEach(id=>document.getElementById(id).value='');document.getElementById('ov-cli').classList.add('show');}
-function saveClient(){const nom=document.getElementById('cli-nom').value.trim(),tel=document.getElementById('cli-tel').value.trim(),cred=parseFloat(document.getElementById('cli-cred').value)||0,date=document.getElementById('cli-date').value;if(!nom||!cred){showToast(t('errMontant'));return;}const bgs=[['#E3F2FD','#2979FF'],['#FCE4EC','#E91E63'],['#E8F5E9','#00C853'],['#FFF8E1','#F5A623'],['#F3E5F5','#7C4DFF']];const[bg,tc]=bgs[DB.clients.length%bgs.length];DB.clients.push({id:DB.clients.length+1,nom,tel:tel||'N/A',credit:cred,date,bg,tc,historique:[{date:new Date().toLocaleDateString('fr-FR'),type:'credit',amt:cred}]});save();closeSheet('ov-cli');renderClients();showToast(t('clientAjoute'));}
+function saveClient(){
+  const nom=document.getElementById('cli-nom').value.trim();
+  const tel=document.getElementById('cli-tel').value.trim();
+  const cred=parseFloat(document.getElementById('cli-cred').value)||0;
+  const date=document.getElementById('cli-date').value;
+  if(!nom){showToast('⚠️ '+(lang==='fr'?'Nom requis':'Name required'));return;}
+  if(!cred||cred<=0){showToast('⚠️ '+(lang==='fr'?'Montant invalide':'Invalid amount'));return;}
+  if(!date){showToast('⚠️ '+(lang==='fr'?"Date d'échéance requise":'Due date required'));return;}
+  const bgs=[['#E3F2FD','#2979FF'],['#FCE4EC','#E91E63'],['#E8F5E9','#00C853'],['#FFF8E1','#F5A623'],['#F3E5F5','#7C4DFF']];
+  const[bg,tc]=bgs[DB.clients.length%bgs.length];
+  DB.clients.push({id:Date.now(),nom,tel:tel||'N/A',credit:cred,date,bg,tc,historique:[{date:new Date().toLocaleDateString('fr-FR'),type:'credit',amt:cred}]});
+  save();closeSheet('ov-cli');renderClients();showToast(t('clientAjoute'));
+}
 function ouvrirDetailClient(id){
   cliCours=DB.clients.find(c=>c.id===id);if(!cliCours)return;
   document.getElementById('cli-detail-nom').textContent=cliCours.nom;
@@ -1927,7 +1984,9 @@ function ouvrirDetailClient(id){
 function calcResteDu(){const amt=parseFloat(document.getElementById('cli-pmt-amt').value)||0;if(!cliCours)return;const reste=Math.max(0,cliCours.credit-amt);document.getElementById('reste-du-card').style.display='block';document.getElementById('reste-recu').textContent=fmt(amt);document.getElementById('reste-val').textContent=fmt(reste);}
 function enregistrerPaiement(){
   const amt=parseFloat(document.getElementById('cli-pmt-amt').value)||0;
-  if(!amt||!cliCours){showToast(t('errQte'));return;}
+  if(!cliCours){showToast(t('errQte'));return;}
+  if(!amt||amt<=0){showToast('⚠️ '+(lang==='fr'?'Montant invalide':'Invalid amount'));return;}
+  if(amt>cliCours.credit){showToast('⚠️ '+(lang==='fr'?'Montant supérieur à la dette':'Amount exceeds debt'));return;}
   cliCours.credit=Math.max(0,cliCours.credit-amt);
   if(!cliCours.historique)cliCours.historique=[];
   cliCours.historique.push({date:new Date().toLocaleDateString('fr-FR'),type:'payment',amt});
@@ -1943,29 +2002,40 @@ function renderEquipe(){
   const c=document.getElementById('equipe-list');if(!c)return;
   const rl={patron:lang==='fr'?'👑 Patron':'👑 Owner',vendeur:lang==='fr'?'👦 Vendeur':'👦 Seller',gerant:lang==='fr'?'👨‍💼 Gérant':'👨‍💼 Manager'};
   const rc={patron:'var(--accent)',vendeur:'var(--blue)',gerant:'var(--purple)'};
-  c.innerHTML=DB.equipe.map((v,i)=>`<div class="vitem3"><div class="vav" style="background:${v.bg};color:${v.tc}">${v.nom[0]}</div><div class="vinfo3"><div class="vname3">${v.nom}</div><div class="vrole3" style="color:${rc[v.role]}">${rl[v.role]}</div></div>${v.role!=='patron'?`<button class="vtog ${v.actif?'on':'off'}" onclick="togV(${i})"></button>`:'<span style="font-size:11px;font-weight:700;background:#E8F5E9;color:#2E7D32;padding:3px 9px;border-radius:20px">'+(lang==='fr'?'Actif':'Active')+'</span>'}</div>`).join('')+`<div class="stitem" style="justify-content:center;color:var(--blue);font-weight:800;font-size:14px;cursor:pointer;padding:13px" onclick="showToast('👤 '+'${lang==='fr'?'Partage le code':'Share the code'} '+DB.config.code)">+ ${lang==='fr'?'Inviter un vendeur':'Invite a seller'}</div>`;
+  const rows=DB.equipe.map(function(v,i){const togBtn=v.role!=='patron'?'<button class="vtog '+(v.actif?'on':'off')+'" onclick="togV('+i+')"></button>':'<span style="font-size:11px;font-weight:700;background:#E8F5E9;color:#2E7D32;padding:3px 9px;border-radius:20px">'+(lang==='fr'?'Actif':'Active')+'</span>';return '<div class="vitem3"><div class="vav" style="background:'+v.bg+';color:'+v.tc+'">'+v.nom[0]+'</div><div class="vinfo3"><div class="vname3">'+v.nom+'</div><div class="vrole3" style="color:'+rc[v.role]+'">'+rl[v.role]+'</div></div>'+togBtn+'</div>';});const inviteBtn='<div class="stitem" style="justify-content:center;color:var(--blue);font-weight:800;font-size:14px;cursor:pointer;padding:13px" onclick="inviterVendeur()">+ '+(lang==='fr'?'Inviter un vendeur':'Invite a seller')+'</div>';c.innerHTML=rows.join('')+inviteBtn;
 }
 function togV(i){DB.equipe[i].actif=!DB.equipe[i].actif;save();renderEquipe();}
+function inviterVendeur(){showToast('👤 '+(lang==='fr'?'Partage le code':'Share code')+' : '+DB.config.code);}
 
 // ════════════════════════════════════════
 // CLÔTURE
 // ════════════════════════════════════════
 function ouvrirCloture(){const att=DB.fondsDepart+totalV;document.getElementById('clot-fonds').textContent=fmt(DB.fondsDepart);document.getElementById('clot-details').innerHTML=`<div class="rrow"><span class="rlbl">${lang==='fr'?'Fonds départ':'Opening cash'}</span><span class="rval a">${fmt(DB.fondsDepart)}</span></div><div class="rrow"><span class="rlbl">+ ${t('ventes')}</span><span class="rval g">${fmt(totalV)}</span></div><div class="rrow"><span class="rlbl">${t('benefice')}</span><span class="rval g">${fmt(totalB)}</span></div><div class="rrow"><span class="rlbl">${lang==='fr'?'Caisse attendue':'Expected cash'}</span><span class="rval" style="font-size:18px;font-weight:900">${fmt(att)}</span></div>`;document.getElementById('inp-compt').value='';document.getElementById('ecart-card').style.display='none';document.getElementById('ov-clot').classList.add('show');}
 function calcEcart(){const compt=parseFloat(document.getElementById('inp-compt').value)||0,att=DB.fondsDepart+totalV,ec=compt-att,el=document.getElementById('ecart-card');el.style.display='flex';el.className='bcard '+(Math.abs(ec)<100?'bon':'bad');document.getElementById('ecart-lbl').textContent=ec===0?'✅ '+(lang==='fr'?'Équilibrée':'Balanced'):ec>0?'📈 '+(lang==='fr'?'Excédent':'Surplus'):'⚠️ '+(lang==='fr'?'Déficit':'Deficit');document.getElementById('ecart-amt').textContent=(ec>=0?'+':'')+fmt(ec);}
-function validerCloture(){closeSheet('ov-clot');showToast(t('clotureValidee')+' '+t('benefice')+': '+fmt(totalB));totalV=0;totalB=0;nbT=0;DB.depenses=[];updateStats();updateObjectifBar();}
+function validerCloture(){showConfirm(lang==='fr'?'🌙 Valider la clôture ?':'🌙 Confirm closing?',lang==='fr'?'Les ventes et dépenses du jour seront archivées et remises à zéro.':'Today\'s sales and expenses will be archived and reset.',()=>{closeSheet('ov-clot');showToast(t('clotureValidee')+' '+t('benefice')+': '+fmt(totalB));totalV=0;totalB=0;nbT=0;DB.depenses=[];updateStats();updateObjectifBar();});}
 
 // ════════════════════════════════════════
 // DÉPENSES
 // ════════════════════════════════════════
-function selDepCat(cat,btn){selDepCat2=cat;document.querySelectorAll('.cat-grid .cat-btn').forEach(x=>x.classList.remove('sel'));btn.classList.add('sel');}
-let selDepCat2='loyer';
+function selDepCat(cat,btn){window._depCat=cat;document.querySelectorAll('.cat-grid .cat-btn').forEach(x=>x.classList.remove('sel'));btn.classList.add('sel');}
+
 function ouvrirDepenses(){renderDepList();document.getElementById('ov-dep').classList.add('show');}
 function renderDepList(){
   const c=document.getElementById('dep-list-content');
   const tot=DB.depenses.reduce((s,d)=>s+d.amt,0);
   c.innerHTML=DB.depenses.length?`<div class="rcard" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:14px;font-weight:700;color:var(--muted)">${lang==='fr'?'Total dépenses':'Total expenses'}</span><span style="font-size:22px;font-weight:900;color:var(--red)">${fmt(tot)}</span></div></div>`+DB.depenses.map(d=>`<div class="dep-item"><div class="dep-ico">💸</div><div class="dep-info"><div class="dep-name">${d.nom}</div><div class="dep-date">${d.cat} · ${d.date}</div></div><div class="dep-amt">-${fmt(d.amt)}</div></div>`).join(''):'';
 }
-function saveDep(){const nom=document.getElementById('dep-nom').value.trim(),amt=parseFloat(document.getElementById('dep-amt').value)||0;if(!nom||!amt){showToast(t('errMontant'));return;}DB.depenses.push({id:DB.depenses.length+1,nom,amt,cat:selDepCat2,date:new Date().toLocaleDateString('fr-FR')});save();renderDepList();document.getElementById('dep-nom').value='';document.getElementById('dep-amt').value='';showToast(t('depOk'));}
+function saveDep(){
+  const nom=document.getElementById('dep-nom').value.trim();
+  const amt=parseFloat(document.getElementById('dep-amt').value)||0;
+  if(!nom){showToast('⚠️ '+(lang==='fr'?'Nom requis':'Name required'));return;}
+  if(!amt||amt<=0){showToast('⚠️ '+(lang==='fr'?'Montant invalide':'Invalid amount'));return;}
+  DB.depenses.push({id:Date.now(),nom,amt,cat:window._depCat||'loyer',date:new Date().toLocaleDateString('fr-FR')});
+  save();renderDepList();
+  document.getElementById('dep-nom').value='';
+  document.getElementById('dep-amt').value='';
+  showToast(t('depOk'));
+}
 
 // ════════════════════════════════════════
 // OBJECTIF
@@ -1983,7 +2053,15 @@ function clearObjectif(){DB.objectif=0;objectif=0;save();closeSheet('ov-obj');do
 // FOURNISSEURS
 // ════════════════════════════════════════
 function ouvrirFournisseurs(){renderFournisseurs();document.getElementById('ov-fourn').classList.add('show');}
-function renderFournisseurs(){const c=document.getElementById('fourn-list');if(!c)return;const al=DB.articles.filter(p=>{const ts=getStock(p);return ts<=p.alerte&&p.alerte>0;});c.innerHTML='<div class="stit2" style="margin-bottom:12px">🚚 '+t('fournisseursMenu')+'</div>'+DB.fournisseurs.map(f=>`<div class="fourn-card"><div style="font-size:30px">🏭</div><div class="fourn-info"><div class="fourn-name">${f.nom}</div><div class="fourn-det">${f.articles}</div></div><button class="bwa" onclick="cmdFourn('${f.nom}','${f.tel}')">📱</button></div>`).join('');}
+function renderFournisseurs(){
+  var c=document.getElementById('fourn-list');if(!c)return;
+  var html='<div class="stit2" style="margin-bottom:12px">🚚 '+t('fournisseursMenu')+'</div>';
+  DB.fournisseurs.forEach(function(f){
+    html+='<div class="fourn-card"><div style="font-size:30px">🏭</div><div class="fourn-info"><div class="fourn-name">'+f.nom+'</div><div class="fourn-det">'+f.articles+'</div></div><button class="bwa" onclick="cmdFournById('+f.id+')">📱</button></div>';
+  });
+  c.innerHTML=html;
+}
+function cmdFournById(id){var f=DB.fournisseurs.find(function(x){return x.id===id;});if(f)cmdFourn(f.nom,f.tel||'');}
 function cmdFourn(nom,tel){const al=DB.articles.filter(p=>{const ts=getStock(p);return ts<=p.alerte&&p.alerte>0;});let msg=`🏪 *${DB.config.nom}*\n\n${lang==='fr'?'Bonjour':'Hello'} ${nom},\n\n${lang==='fr'?'Nous souhaitons commander :':'We want to order:'}\n`;if(al.length)al.forEach(p=>msg+=`• ${p.emoji} ${p.nom}\n`);else msg+=`• ...\n`;msg+=`\n${lang==='fr'?'Merci !':'Thank you!'}`;if(tel)window.open('https://wa.me/'+tel.replace(/\s/g,'')+'?text='+encodeURIComponent(msg),'_blank');else window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');}
 
 // ════════════════════════════════════════
@@ -2033,10 +2111,80 @@ function showToast(msg){const t2=document.getElementById('toast');t2.textContent
 function copierCode(){navigator.clipboard?.writeText(DB.config.code).then(()=>showToast(t('codeCopie')+' '+DB.config.code));}
 function voiceSearch(){if(!('SpeechRecognition'in window||'webkitSpeechRecognition'in window)){showToast(t('microIndispo'));return;}const SR=window.SpeechRecognition||window.webkitSpeechRecognition,r=new SR();r.lang=lang==='fr'?'fr-FR':'en-US';r.onresult=e=>{const q=e.results[0][0].transcript;document.getElementById('src-c').value=q;filtrC(q);};r.onerror=()=>showToast('🎤');r.start();showToast(t('microParle'));}
 
+function showConfirm(title,msg,onConfirm){
+  let ov=document.getElementById('confirm-ov');
+  if(!ov){
+    ov=document.createElement('div');
+    ov.id='confirm-ov';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(4px)';
+    ov.innerHTML=`<div style="background:#fff;border-radius:22px;padding:24px;width:100%;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div id="confirm-title" style="font-size:18px;font-weight:800;color:var(--text);margin-bottom:8px"></div>
+      <div id="confirm-msg" style="font-size:14px;color:var(--muted);font-weight:600;margin-bottom:20px"></div>
+      <div style="display:flex;gap:10px">
+        <button id="confirm-cancel" style="flex:1;padding:13px;border-radius:13px;border:2px solid var(--border);background:#fff;font-size:15px;font-weight:700;font-family:'Outfit',sans-serif;cursor:pointer;color:var(--muted)"></button>
+        <button id="confirm-ok" style="flex:1;padding:13px;border-radius:13px;border:none;background:var(--red);color:#fff;font-size:15px;font-weight:800;font-family:'Outfit',sans-serif;cursor:pointer"></button>
+      </div>
+    </div>`;
+    document.body.appendChild(ov);
+  }
+  document.getElementById('confirm-title').textContent=title;
+  document.getElementById('confirm-msg').textContent=msg;
+  document.getElementById('confirm-cancel').textContent=lang==='fr'?'Annuler':'Cancel';
+  document.getElementById('confirm-ok').textContent=lang==='fr'?'Confirmer':'Confirm';
+  ov.style.display='flex';
+  document.getElementById('confirm-cancel').onclick=()=>{ov.style.display='none';};
+  document.getElementById('confirm-ok').onclick=()=>{ov.style.display='none';onConfirm();};
+}
+
+// ════════════════════════════════════════
+// EXPOSITION GLOBALE (requis pour type="module")
+// ════════════════════════════════════════
+Object.assign(window,{
+  demarrer,goScreen,goTab,showToast,showConfirm,
+  openSheet,closeSheet,
+  // Onboarding
+  selLang,selPays,selSecteur,finirOnboard,
+  // PIN
+  pk,pdel,closePin,submitPin,ouvrirSettings,
+  // Caisse
+  addPan,renderProd,filtrC,voiceSearch,viderPanier,
+  ouvrirPanier,encaisser,confirmerVente,annulerVente,
+  ouvrirMonnaie,
+  // Prix
+  ouvrirPrix,savePrix,saveRapide,
+  // Stock
+  ouvrirStock,saveStock,
+  // Articles
+  ouvrirAjoutArticle,saveArticle,goAS,selEmojiF,selCatF,selRupture,
+  ctxSuppr,ctxEdit,ctxPrix,ctxStock,ctxVariantes,closeCtx,openCtx,
+  // Variantes
+  ouvrirAddVar,saveVariante,selVarInPan,confirmerSelVar,
+  // Rapports
+  renderRapport,switchRapport,
+  // Clients
+  ouvrirAddClient,saveClient,ouvrirClientDetail,enregistrerPaiement,renderClients,
+  // Dépenses
+  ouvrirDep,saveDep,selDepCat,renderDepList,
+  // Clôture
+  ouvrirCloture,validerCloture,
+  // Objectif
+  ouvrirObjectif,saveObjectif,
+  // Settings
+  ouvrirLang,selLangParam,selPaysParam,saveChangeLangDevise,
+  switchTheme,deconnecter,
+  // Notifications
+  ouvrirNotifs,
+  // Stock négatif
+  ouvrirStockNeg,confirmerStockNeg,
+});
+
 // ════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════
-document.addEventListener('DOMContentLoaded',()=>{demarrer();});
+document.addEventListener('DOMContentLoaded', async ()=>{
+  DB = await loadDB();
+  demarrer();
+});
 </script>
 </body>
 </html>
